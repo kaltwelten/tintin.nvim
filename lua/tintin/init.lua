@@ -1,3 +1,20 @@
+local _defaults = {
+  delay_ms = 5,
+  nc_blend_percent = 40,
+}
+
+local function _tintable(win)
+  if
+    win ~= vim.api.nvim_get_current_win() and
+    vim.api.nvim_win_get_tabpage(win) == vim.api.nvim_get_current_tabpage() and
+    vim.fn.win_gettype(win) == ''
+  then
+    local buftype = vim.bo[vim.api.nvim_win_get_buf(win)].buftype
+    return buftype == '' or buftype == 'help'
+  end
+  return false
+end
+
 local function _create_overlay_config(win)
   local wininfo = vim.fn.getwininfo(win)[1]
   return {
@@ -13,37 +30,31 @@ local function _create_overlay_config(win)
   }
 end
 
-local _loaded = false
-
 local M = {}
 
-function M.setup()
-  if _loaded then return end
+function M.setup(opts)
+  if M.loaded then return end
+  M.loaded = true
+  M.options = vim.tbl_deep_extend('force', {}, _defaults, opts or {})
   local overlay_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_set_option_value('filetype', 'tintin', { buf = overlay_buf })
+  vim.bo[overlay_buf].filetype = 'tintin'
   local overlays = {}
-  vim.api.nvim_create_autocmd('WinResized', {
+  vim.api.nvim_create_autocmd('WinEnter', {
     group = vim.api.nvim_create_augroup('tintin', { clear = true }),
     callback = function()
       for i, o in ipairs(overlays) do
-        vim.api.nvim_win_close(o, false)
+        if vim.api.nvim_win_is_valid(o) then vim.api.nvim_win_close(o, false) end
         overlays[i] = nil
       end
-      vim.schedule(function()
-        for _, w in ipairs(vim.api.nvim_list_wins()) do
-          if w ~= vim.api.nvim_get_current_win() and vim.fn.win_gettype(w) == '' then
-            local buftype = vim.api.nvim_get_option_value('buftype', { buf = vim.api.nvim_win_get_buf(w) })
-            if buftype == '' or buftype == 'help' then
-              local overlay = vim.api.nvim_open_win(overlay_buf, false, _create_overlay_config(w))
-              vim.api.nvim_set_option_value('winblend', 50, { win = overlay })
-              overlays[#overlays + 1] = overlay
-            end
-          end
+      vim.defer_fn(function()
+        for _, w in ipairs(vim.tbl_filter(function(w) return _tintable(w) end, vim.api.nvim_list_wins())) do
+          local overlay = vim.api.nvim_open_win(overlay_buf, false, _create_overlay_config(w))
+          vim.wo[overlay].winblend = M.options.nc_blend_percent
+          overlays[#overlays + 1] = overlay
         end
-      end)
+      end, M.options.delay_ms)
     end,
   })
-  _loaded = true
 end
 
 return M
